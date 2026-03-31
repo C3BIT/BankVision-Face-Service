@@ -1,0 +1,17 @@
+services:
+  face-service:
+    image: bankvision/face-service:uat
+    build: .
+    container_name: bankvision-face-service
+    restart: unless-stopped
+    ports:
+      - "5097:5097"
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5097/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
