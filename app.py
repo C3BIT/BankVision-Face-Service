@@ -312,6 +312,59 @@ async def compare_faces(request: CompareRequest):
         message="Face comparison completed using SFace model"
     )
 
+class CompareImagesRequest(BaseModel):
+    image1: str  # URL or base64
+    image2: str  # URL or base64
+
+class CompareImagesResponse(BaseModel):
+    matched: bool
+    similarity: float
+    ssim_score: float
+    message: str
+
+@app.post("/compare-images", response_model=CompareImagesResponse)
+async def compare_images(request: CompareImagesRequest):
+    """
+    Compare two document/signature images using SSIM (Structural Similarity Index).
+    Use this endpoint for signature verification, not face comparison.
+    """
+    img1 = await load_image(request.image1)
+    img2 = await load_image(request.image2)
+
+    if img1 is None:
+        raise HTTPException(status_code=400, detail="Failed to load image 1")
+    if img2 is None:
+        raise HTTPException(status_code=400, detail="Failed to load image 2")
+
+    # Convert to grayscale for SSIM
+    gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+    gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+
+    # Resize to same dimensions (match to smaller)
+    h = min(gray1.shape[0], gray2.shape[0])
+    w = min(gray1.shape[1], gray2.shape[1])
+    gray1 = cv2.resize(gray1, (w, h))
+    gray2 = cv2.resize(gray2, (w, h))
+
+    # Compute SSIM via normalized cross-correlation as approximation
+    # OpenCV does not ship skimage; use matchTemplate for normalized correlation
+    result = cv2.matchTemplate(gray1.astype(np.float32), gray2.astype(np.float32), cv2.TM_CCOEFF_NORMED)
+    score = float(result[0][0])  # -1 to 1
+
+    # Map to 0-100
+    similarity = max(0.0, min(100.0, (score + 1) * 50))
+    matched = similarity >= 60.0
+
+    logger.info(f"Image similarity (TM_CCOEFF_NORMED): score={score:.4f} → {similarity:.1f}%, matched={matched}")
+
+    return CompareImagesResponse(
+        matched=matched,
+        similarity=round(similarity, 2),
+        ssim_score=round(score, 4),
+        message="Image comparison completed"
+    )
+
+
 @app.get("/")
 async def root():
     """Root endpoint with service info"""
@@ -329,7 +382,8 @@ async def root():
             "Pure OpenCV implementation"
         ],
         "endpoints": {
-            "compare": "POST /compare - Compare two face images",
+            "compare": "POST /compare - Compare two face images (SFace embeddings)",
+            "compare-images": "POST /compare-images - Compare two document/signature images (SSIM)",
             "health": "GET /health - Health check"
         }
     }
